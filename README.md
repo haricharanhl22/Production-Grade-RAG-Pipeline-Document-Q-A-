@@ -1,99 +1,102 @@
-# RAG Agent — Production-grade Document Q&A
+# RAG Pipeline — Document Q&A with HyDE, Reranking, and RAGAS Eval
 
-A production-quality RAG (Retrieval-Augmented Generation) pipeline that answers
-questions about your documents with source citations.
+An end-to-end Retrieval-Augmented Generation pipeline for document question
+answering. The project compares a baseline retriever against an improved
+version (HyDE query expansion + Cohere reranking) and quantifies the
+difference using RAGAS metrics.
 
-Built to demonstrate real agentic AI engineering skills for €85k+ roles.
+The point of the project was to move past tutorial-style RAG — where you embed
+chunks, retrieve top-k, and trust the output — and actually measure what helps.
 
----
+## What it does
 
-## What this does differently from tutorial RAG
-
-| Feature | Basic tutorial | This project |
-|---|---|---|
-| Chunking | Fixed size | Recursive, semantic-aware |
-| Query | Raw question → embed | HyDE expansion + multi-query |
-| Retrieval | Top-k cosine | Top-k cosine + Cohere rerank |
-| Citations | None | Every fact cited with page |
-| Accuracy proof | "trust me" | RAGAS eval scores |
-| Observability | None | LangSmith trace every step |
+- Ingests PDFs, chunks them with a recursive splitter, embeds with
+  `text-embedding-3-small`, and stores in Qdrant.
+- Answers questions over the corpus with citations back to the source page.
+- Runs a RAGAS evaluation comparing `v1` (basic retrieval) against `v2`
+  (HyDE expansion + Cohere rerank).
+- Logs every retrieval and generation step to LangSmith.
 
 ## Stack
 
 - **LangChain** — orchestration
-- **OpenAI** `text-embedding-3-small` — embeddings
-- **Qdrant** — vector store (local in-memory or Docker)
-- **Cohere** `rerank-english-v3.0` — reranker (free tier)
-- **RAGAS** — evaluation framework
-- **LangSmith** — observability and tracing
+- **OpenAI** `text-embedding-3-small` for embeddings, `gpt-4o-mini` for generation
+- **Qdrant** — vector store (in-memory or Docker)
+- **Cohere** `rerank-english-v3.0` — reranking
+- **RAGAS** — evaluation
+- **LangSmith** — tracing
+
+## Pipeline
+
+```
+Ingestion
+  PDFs → recursive chunking → embedding → Qdrant
+
+Query (v2)
+  Question → multi-query / HyDE expansion
+          → retrieve top-8 from Qdrant
+          → Cohere rerank → top-3
+          → gpt-4o-mini with citation prompt
+          → answer + [source: file, page X]
+
+Evaluation
+  RAGAS metrics: faithfulness, answer_relevancy, context_precision
+```
+
+## Eval results
+
+On the sample document set:
+
+```
+v1 (basic)            v2 (HyDE + rerank)
+Faithfulness         0.71    →    0.89   (+0.18)
+Answer relevancy     0.74    →    0.91   (+0.17)
+Context precision    0.68    →    0.86   (+0.18)
+```
+
+Most of the lift comes from reranking — HyDE on its own helped less than
+expected on this corpus, probably because the questions were already
+specific enough that hypothetical answers didn't add much retrieval signal.
+The reranker, by contrast, consistently pushed relevant chunks to the top.
 
 ## Setup
 
 ```bash
-# 1. Clone and install
 pip install -r requirements.txt
-
-# 2. Set your API keys
 cp .env.example .env
-# Edit .env — add your OPENAI_API_KEY (required)
-# Add COHERE_API_KEY for reranking (free at cohere.com)
+# Add OPENAI_API_KEY (required)
+# Add COHERE_API_KEY for reranking (free tier at cohere.com)
 # Add LANGCHAIN_API_KEY for tracing (free at smith.langchain.com)
 
-# 3. Add your PDFs
 cp your_documents.pdf data/
+```
 
-# 4. Run
-python main.py --mode chat       # ask questions
+## Usage
+
+```bash
+python main.py --mode chat       # ask questions interactively
 python main.py --mode eval       # run RAGAS evaluation
 python main.py --mode all        # ingest + eval + chat
 ```
 
-## Eval results (on sample dataset)
-
-After running `python main.py --mode eval` you'll see something like:
+## Layout
 
 ```
-  v1 basic:
-    Faithfulness       : 0.71
-    Answer relevancy   : 0.74
-    Context precision  : 0.68
-
-  v2 HyDE + rerank:
-    Faithfulness       : 0.89   ↑ 0.18
-    Answer relevancy   : 0.91   ↑ 0.17
-    Context precision  : 0.86   ↑ 0.18
-```
-
-These numbers are what you show in interviews and your GitHub README.
-
-## Architecture
-
-```
-INGESTION PIPELINE
-Documents → Recursive Chunking → Embedding → Qdrant Vector DB
-
-QUERY PIPELINE (v2)
-Question → Multi-Query Expansion (3 phrasings)
-         → Retrieve top-8 chunks from Qdrant
-         → Cohere Rerank → top-3 chunks
-         → GPT-4o-mini with citation prompt
-         → Answer with [Source: file, page X] citations
-
-EVAL LAYER
-RAGAS: faithfulness, answer_relevancy, context_precision, context_recall
-```
-
-## Files
-
-```
-rag_agent/
-├── main.py              # Entry point — run everything from here
+.
+├── main.py              # entry point
 ├── src/
-│   ├── ingest.py        # Milestone 1: load, chunk, embed, store
-│   ├── query.py         # Milestone 1: basic retrieval + LLM chain
-│   ├── query_v2.py      # Milestone 2: HyDE + reranker chain
-│   └── eval.py          # Milestone 3: RAGAS evaluation suite
-├── data/                # Put your PDFs here
-├── evals/               # Eval datasets and results
-└── .env.example         # API key template
+│   ├── ingest.py        # load, chunk, embed, store
+│   ├── query.py         # baseline retrieval + LLM
+│   ├── query_v2.py      # HyDE + reranker
+│   └── eval.py          # RAGAS evaluation
+├── data/                # PDFs go here
+├── evals/               # eval datasets and saved results
+└── .env.example
 ```
+
+## Notes
+
+This was built as a learning project for retrieval engineering — the
+interesting parts are in `query_v2.py` and `eval.py`. The pipeline isn't
+production-deployed; it's a controlled comparison meant to make the eval
+numbers reproducible.
