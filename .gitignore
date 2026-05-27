@@ -1,0 +1,19 @@
+# Environments
+.env
+.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/
+
+# Local data & logs
+.gemini/
+*.log
